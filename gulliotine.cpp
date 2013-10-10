@@ -9,6 +9,8 @@
 #include "blade.h"
 #include "head.h"
 #include "button.h"
+#include "strobe.h"
+#include "body.h"
 
 #define LED_DDR DDRC
 #define LED_PORT PORTC
@@ -63,23 +65,31 @@ int main(void)
     /////////////////////////////////////////
     //SET UP
     enum Vargs {INIT, WAIT, CHECK, RAISE, LOWER, CHECKRAISE, CHECKLOWER, HEADRAISE, HEADLOWER, CHECKHDRAISE, CHECKHDLOWER, \
-        HEADTILT, CHECKHDTILT, LOWERTILTROD, CHECKLOWERTILTROD, ERROR};
+        ENDBODYTWITCH, HEADTILT, CHECKHDTILT, BODYTWITCH, LOWERTILTROD, CHECKLOWERTILTROD, LOWERHOIST, CHECKLOWERHOIST, \
+        STROBEON, STROBEOFF, INTERMISSION, ERROR};
 
     //*_LONG = SECONDS
     //*_SHORT = 10mS
-    const uint8_t CHOP_PAUSE_LONG = 12; //pause between reset all and blade lower
+    const uint8_t INTERMISSION_PAUSE_LONG = 10; //pause between reset and lower
+    const uint8_t CHOP_PAUSE_LONG = 12; //pause between intermission and blade lower
     const uint8_t RAISE_PAUSE_LONG = 30; //pause after blade lower to raise again
     const uint8_t HEAD_RAISE_PAUSE_LONG = 30; //pause after blade raised to raise head
     const uint8_t HEAD_TILT_PAUSE_LONG = 30; //pause after head raise to tilt head into lock
+    const uint8_t END_BODY_TWITCH_PAUSE_LONG = 10; //duration of body twitch
 
+    //GUILLOTINE OBJECTS
     Blade myBlade = Blade(ptr_Timer);
     Head myHead = Head(ptr_Timer);
     Button myButton = Button(ptr_Timer);
+    Strobe myStrobe = Strobe(ptr_Timer);
+    Body myBody = Body(ptr_Timer);
+
     Vargs state = INIT;
     Vargs nextState = WAIT;
     uint16_t longTime = 0;
     uint8_t forceNextState = 0;
     uint8_t isTest = 0;
+    uint8_t debugMode = 0;
 
     sei();
 
@@ -93,6 +103,9 @@ int main(void)
           STATE MAP
             INIT
           * WAIT
+                INTERMISSION
+            INTERMISSION
+            WAIT
                 LOWER
             LOWER
             CHECKLOWER
@@ -100,8 +113,8 @@ int main(void)
             CHECKHDLOWER
             BODYTWITCH**
             WAIT
-                ENDBODYTWITCH**
-            ENDBODYTWITCH**
+                ENDBODYTWITCH
+            ENDBODYTWITCH
             WAIT
                 RAISE
             RAISE
@@ -124,8 +137,17 @@ int main(void)
             CHECKLOWERHOIST**
             BACK TO * WAIT
         */
-        switch (state)
+        if (DBSerial.available())
         {
+            if (DBSerial.read() == 'D') debugMode = 1;
+        }
+
+        switch (debugMode)
+        {
+        case 0:
+
+            switch (state)
+            {
         //INIT: SET GUILLOTINE TO DEFAULT POSITIONS
         //      BLADE UP, HEAD UP, HEAD TILT UP
         case INIT:
@@ -150,9 +172,15 @@ int main(void)
                 state = ERROR;
                 break;
             }
+            else if (!myBody.init())    //MAKE SURE LEGS WORKING
+            {
+                state = ERROR;
+                break;
+            }
+            myStrobe.init();
             state = WAIT;
             nextState = LOWER;
-            setTimer();
+            setTimer(); //SO WAIT STATE STARTS WITH TIMER AT 0
             break;
 
         //WAIT: WAIT UNTIL TIME TO DO nextState
@@ -165,12 +193,29 @@ int main(void)
 
             }
             if (myButton.read()) forceNextState = 1;
+
             switch (nextState)
             {
+            case INTERMISSION:
+                if (longTime >= INTERMISSION_PAUSE_LONG || forceNextState)
+                {
+                    state = LOWER;
+                    longTime = 0;
+                    forceNextState = 0;
+                }
             case LOWER:
                 if (longTime >= CHOP_PAUSE_LONG || forceNextState)
                 {
                     state = LOWER;
+                    longTime = 0;
+                    forceNextState = 0;
+                }
+                break;
+
+            case ENDBODYTWITCH:
+                if (longTime >= HEAD_TILT_PAUSE_LONG || forceNextState)
+                {
+                    state = HEADTILT;
                     longTime = 0;
                     forceNextState = 0;
                 }
@@ -184,6 +229,7 @@ int main(void)
                     forceNextState = 0;
                 }
                 break;
+
             case HEADRAISE:
                 if (longTime >= HEAD_RAISE_PAUSE_LONG || forceNextState)
                 {
@@ -192,11 +238,85 @@ int main(void)
                     forceNextState = 0;
                 }
                 break;
+
+            case HEADTILT:
+                if (longTime >= HEAD_TILT_PAUSE_LONG || forceNextState)
+                {
+                    state = HEADTILT;
+                    longTime = 0;
+                    forceNextState = 0;
+                }
+                break;
+
+            case LOWERTILTROD:
+                if (longTime >= HEAD_TILT_PAUSE_LONG || forceNextState)
+                {
+                    state = HEADTILT;
+                    longTime = 0;
+                    forceNextState = 0;
+                }
+                break;
+
+            case LOWERHOIST:
+                if (longTime >= HEAD_TILT_PAUSE_LONG || forceNextState)
+                {
+                    state = HEADTILT;
+                    longTime = 0;
+                    forceNextState = 0;
+                }
+                break;
+
             }
             break;
 
         case CHECK:
 
+            break;
+
+        case INTERMISSION:
+
+            break;
+
+        case LOWER:
+            if (myBlade.checkIfUp())
+            {
+                myBlade.lowerBlade();
+                state = CHECKLOWER;
+
+            }
+            else state = ERROR;
+            break;
+
+        case CHECKLOWER:
+            ////TODO: check if takes too long
+            if (myBlade.checkIfDown())
+            {
+                state = HEADLOWER;
+            }
+            break;
+
+        case HEADLOWER:
+            ////Lower head
+            //if lowered
+            state = CHECKHDLOWER;
+            break;
+
+        case CHECKHDLOWER:
+            //if LOWERED
+            state = WAIT;
+            nextState = RAISE;
+            break;
+
+        case BODYTWITCH:
+            //if LOWERED
+            state = WAIT;
+            nextState = RAISE;
+            break;
+
+        case ENDBODYTWITCH:
+            //if LOWERED
+            state = WAIT;
+            nextState = RAISE;
             break;
 
         case RAISE:
@@ -205,16 +325,6 @@ int main(void)
                 myBlade.raiseBlade();
                 setTimer();
                 state = CHECKRAISE;
-
-            }
-            else state = ERROR;
-            break;
-
-        case LOWER:
-            if (myBlade.checkIfUp())
-            {
-                myBlade.lowerBlade();
-                state = CHECKLOWER;
 
             }
             else state = ERROR;
@@ -241,32 +351,48 @@ int main(void)
 
             break;
 
-        case CHECKLOWER:
-            ////TODO: check if takes too long
-            if (myBlade.checkIfDown())
-            {
-                state = HEADLOWER;
-            }
-            break;
-
         case HEADRAISE:
 
-            break;
-
-        case HEADLOWER:
-            ////Lower head
-            //if lowered
-            state = CHECKHDLOWER;
             break;
 
         case CHECKHDRAISE:
 
             break;
 
-        case CHECKHDLOWER:
-            //if LOWERED
-            state = WAIT;
-            nextState = RAISE;
+        case HEADTILT:
+            ////Lower head
+            //if lowered
+            state = CHECKHDLOWER;
+            break;
+
+        case CHECKHDTILT:
+
+            break;
+
+        case LOWERTILTROD:
+            ////Lower head
+            //if lowered
+            state = CHECKHDLOWER;
+            break;
+
+        case CHECKLOWERTILTROD:
+
+            break;
+
+        case LOWERHOIST:
+
+            break;
+
+        case CHECKLOWERHOIST:
+
+            break;
+
+        case STROBEON:
+
+            break;
+
+        case STROBEOFF:
+
             break;
 
         case ERROR:
@@ -281,7 +407,19 @@ int main(void)
 
             break;
         }
+            break;
 
+        case 1:
+            DBSerial.println(const_cast <char*> ("DBMode"));
+
+            while (debugMode || !myButton.read())
+            {
+
+            }
+            debugMode = 0;
+            state = INIT;
+            break;
+        }
     }
 
 }
