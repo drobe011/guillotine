@@ -1,0 +1,23 @@
+# Compiled Object files
+*.slo
+*.lo
+*.o
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+
+# Directories
+bin/
+obj/
+
+# Project files
+*.layout
+*.depend
+*.cbp
+
