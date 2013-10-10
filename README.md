@@ -1,4 +1,0 @@
-guillotine
-==========
-
-Automated Halloween Guillotine
