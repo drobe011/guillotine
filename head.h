@@ -3,12 +3,14 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <debug/debugserial.h>
 
 #define HEAD_UP_MAX_TIME 500
 #define HEAD_DOWN_MAX_TIME 200
 #define HOIST_DOWN_MAX_TIME 300
 #define TILT_UP_MAX_TIME 300
 #define TILT_DOWN_MAX_TIME 300
+#define RELEASE_ON_MAX_TIME 50
 
 #define HOIST_PORT PORTD
 #define HOIST_DDR DDRD
@@ -55,24 +57,22 @@ class Head
 {
     public:
         Head(volatile uint16_t * ptr_T);
-        uint8_t init(uint8_t);
-        void raiseHead();
-        void lowerHead();
-        void lowerHoist();
-        void motorOff();
-        void tiltHeadUp(); ///////////
-        void tiltHeadDown(); ////////
-        void tiltOff(); ///////////
-        uint8_t checkIfUp();
-        uint8_t checkIfDown();
-        uint8_t checkIfHoistDown();
-        uint8_t checkIfTiltUp(); ////////////
-        uint8_t checkIfTiltDown(); //////////
+        uint8_t init();
+        uint8_t raiseHeadPoll(uint8_t = 0);
+        uint8_t lowerHeadPoll(uint8_t = 0);
+        uint8_t lowerHoistPoll(uint8_t = 0);
+        uint8_t tiltHeadUpPoll(uint8_t = 0);
+        uint8_t tiltRodDownPoll(uint8_t = 0);
+        void turnOff();
+        void sol(uint8_t);
+        void printDebug(DebugSerial *);
+        enum {ERROR, DONE, COMPLETE, WORKING, NOT_STARTED, RESET};
     protected:
     private:
         volatile uint16_t * ptr_Timer;
         void configHoistTimer();
         void configTiltTimer();
+        uint8_t status;
         __inline__ void setTimer(uint16_t tm = 0)
         {
             cli();

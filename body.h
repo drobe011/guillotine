@@ -3,6 +3,7 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <debug/debugserial.h>
 
 #define BODY_PORT PORTB
 #define BODY_DDR DDRB
@@ -25,11 +26,15 @@ class Body
         Body(volatile uint16_t * ptr_T);
         uint8_t init();
         uint8_t bodyOn(uint8_t = DEFAULT_DUTY, uint8_t = 1);
-        uint8_t bodyOff();
-        uint8_t bodyReverse();
+        void turnOff();
+        //uint8_t bodyReverse();
+        uint8_t bodyKickPoll(uint8_t = 0);
+        void printDebug(DebugSerial *);
+        enum {ERROR, DONE, COMPLETE, WORKING, NOT_STARTED, RESET};
     protected:
     private:
         volatile uint16_t * ptr_Timer;
+        uint8_t bodyStatus;
         void configTimer();
         __inline__ void setTimer(uint16_t tm = 0)
         {

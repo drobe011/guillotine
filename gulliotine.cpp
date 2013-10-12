@@ -3,9 +3,7 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
-#ifdef DEBUG
 #include <debug/debugserial.h>
-#endif // DEBUG
 #include "blade.h"
 #include "head.h"
 #include "button.h"
@@ -16,9 +14,12 @@
 #define LED_PORT PORTC
 #define LED_PIN 6
 
+#define SETTIMERSEC(a) a*2
+#define SETTIMERMIN(a) (a*2)*60
+
 //SET UP GLOBAL VARIABLES
 volatile uint16_t localTimer; //VARIABLE TO HOLD CURRENT TIMER TICK
-volatile uint16_t * ptr_Timer = &localTimer;  //POINTER TO ABOVE, ABLE TO PASS TO CLASS INSTANCES
+volatile uint16_t *ptr_Timer = &localTimer;  //POINTER TO ABOVE, ABLE TO PASS TO CLASS INSTANCES
 
 inline void setTimer(uint16_t tm = 0)
 {
@@ -49,379 +50,494 @@ inline void LED_OFF()
 
 int main(void)
 {
-    //SET UP PIN MODES
-    #ifdef DEBUG
-    DebugSerial DBSerial = DebugSerial();
-    #endif // DEBUG
-
     //SET UP GP TIMER
-    TCCR2A = 0b00000010; //CTC MODE
-    TCCR2B = 0b00000111; // /1024
-    TIMSK2 = 0b00000010; // CTCIE
+    TCCR2A = _BV(WGM21); //CTC MODE
+    TCCR2B = _BV(CS20) | _BV(CS21) | _BV(CS22); // /1024 prescale
+    TIMSK2 = _BV(OCIE2A); // CTCIE
     OCR2A = 155;  //100.16026 Hz (~10mS)
+
     //SET UP STATUS LED
     CONFIG_LED();
 
     /////////////////////////////////////////
-    //SET UP
-    enum Vargs {INIT, WAIT, CHECK, RAISE, LOWER, CHECKRAISE, CHECKLOWER, HEADRAISE, HEADLOWER, CHECKHDRAISE, CHECKHDLOWER, \
-        ENDBODYTWITCH, HEADTILT, CHECKHDTILT, BODYTWITCH, LOWERTILTROD, CHECKLOWERTILTROD, LOWERHOIST, CHECKLOWERHOIST, \
-        STROBEON, STROBEOFF, INTERMISSION, ERROR};
+    //SET UP STATE ENUMS
+    enum D_State {SERIAL_DEBUG, NORMAL};
+    enum V_State {INIT, WAIT, RUN, ERROR};
+    enum V_NextState {LOWER, HEADLOWER, BODYTWITCH, INTERMISSION1, RAISE, HEADRAISE, HEADTILT, LOWERTILTROD, \
+    LOWERHOIST, INTERMISSION2};
 
-    //*_LONG = SECONDS
+    //SET UP TIMING CONSTANTS
+    //*_LONG = 0.5 SECONDS
     //*_SHORT = 10mS
-    const uint8_t INTERMISSION_PAUSE_LONG = 10; //pause between reset and lower
-    const uint8_t CHOP_PAUSE_LONG = 12; //pause between intermission and blade lower
-    const uint8_t RAISE_PAUSE_LONG = 30; //pause after blade lower to raise again
-    const uint8_t HEAD_RAISE_PAUSE_LONG = 30; //pause after blade raised to raise head
-    const uint8_t HEAD_TILT_PAUSE_LONG = 30; //pause after head raise to tilt head into lock
-    const uint8_t END_BODY_TWITCH_PAUSE_LONG = 10; //duration of body twitch
+    const uint16_t CHOP_PAUSE_LONG = SETTIMERMIN(1); //pause between intermission and blade lower
+    const uint16_t HEAD_DROP_PAUSE_LONG = 1; ///////////turn to short
+    const uint16_t BODY_TWITCH_START_PAUSE_LONG = 0; //////////turn to short
+    const uint16_t INTERMISSION1_PAUSE_LONG = SETTIMERMIN(1); //pause between reset and lower
+    const uint16_t RAISE_PAUSE_LONG = SETTIMERSEC(30); //pause after blade lower to raise again
+    const uint16_t HEAD_RAISE_PAUSE_LONG = SETTIMERSEC(15); //pause after blade raised to raise head
+    const uint16_t HEAD_TILT_PAUSE_LONG = SETTIMERSEC(1); //pause after head raise to tilt head into lock
+    const uint16_t LOWER_TILT_ROD_PAUSE_LONG = SETTIMERSEC(1); //pause between reset and lower
+    const uint16_t LOWER_HOIST_PAUSE_LONG = 0; //pause between reset and lower
+    const uint16_t INTERMISSION2_PAUSE_LONG = SETTIMERMIN(1); //pause between reset and lower
 
-    //GUILLOTINE OBJECTS
+
+    //SET UP GUILLOTINE OBJECTS
+    DebugSerial DBSerial = DebugSerial();
     Blade myBlade = Blade(ptr_Timer);
     Head myHead = Head(ptr_Timer);
     Button myButton = Button(ptr_Timer);
     Strobe myStrobe = Strobe(ptr_Timer);
     Body myBody = Body(ptr_Timer);
+    //Music myMusic = Music();
 
-    Vargs state = INIT;
-    Vargs nextState = WAIT;
-    uint16_t longTime = 0;
-    uint8_t forceNextState = 0;
-    uint8_t isTest = 0;
-    uint8_t debugMode = 0;
+    //SET UP LOCAL (MAIN SCOPED) VARIABLES
+    D_State debugMode = NORMAL; //STARTS UP IN NORMAL MODE
+    V_State state = INIT;       //INITIAL MAIN STATE
+    V_NextState nextState = LOWER;  //HOLDS NEXT RUN STATE
+    uint16_t longTime = 0;      //HOLDS SECONDS
+    uint8_t forceNextState = 0; //FLAG THAT BUTTON PRESS WHILE IN WAIT STATE
+    uint8_t pollState = 0;      //HOLDS POLLING INFO (WORKING, COMPLETE, ERROR)
+    uint16_t nextWaitTime = 0;  //HOLDS PAUSE TO NEXT RUN STATE
 
     sei();
 
-    if (myButton.read()) isTest = 1;
+    if (myButton.read()) debugMode = SERIAL_DEBUG;
+
+    #ifdef DEBUG
+    debugMode = SERIAL_DEBUG;
+    #endif // DEBUG
 
     while(1)
     {
-        /*START BASIC STATE MACHINE
-            state = actual state
-            nextState = next state after time delay is up
-          STATE MAP
-            INIT
-          * WAIT
-                INTERMISSION
-            INTERMISSION
-            WAIT
-                LOWER
-            LOWER
-            CHECKLOWER
-            HEADLOWER
-            CHECKHDLOWER
-            BODYTWITCH**
-            WAIT
-                ENDBODYTWITCH
-            ENDBODYTWITCH
-            WAIT
-                RAISE
-            RAISE
-            CHECKRAISE
-            WAIT
-                HEADRAISE
-            HEADRAISE
-            CHECKHDRAISE
-            WAIT
-                HEADTILT
-            HEADTILT
-            CHECKHDTILT
-            WAIT
-                LOWERTILTROD
-            LOWERTILTROD
-            CHECKLOWERTILTROD
-            WAIT
-                LOWERHOIST**
-            LOWERHOIST**
-            CHECKLOWERHOIST**
-            BACK TO * WAIT
-        */
         if (DBSerial.available())
         {
-            if (DBSerial.read() == 'D') debugMode = 1;
+            if (DBSerial.read() == 'D') debugMode = SERIAL_DEBUG;
         }
 
         switch (debugMode)
         {
-        case 0:
+        case NORMAL:
 
             switch (state)
             {
         //INIT: SET GUILLOTINE TO DEFAULT POSITIONS
         //      BLADE UP, HEAD UP, HEAD TILT UP
-        case INIT:
-            LED_OFF();
-            if (!myBlade.init())        //MOVE BLADE TO UP POSITION
+            case INIT:
             {
-                state = ERROR;
-                break;
-            }
-            else if (!myHead.init(0))   //MOVE HEAD TILT ROD TO HOME POSITION
-            {
-                state = ERROR;
-                break;
-            }
-            else if (!myHead.init(1))   //MOVE HEAD AND HEAD TILT TO UP POSITION
-            {
-                state = ERROR;
-                break;
-            }
-            else if (!myHead.init(0))   //MOVE HEAD TILT ROD TO HOME POSITION
-            {
-                state = ERROR;
-                break;
-            }
-            else if (!myBody.init())    //MAKE SURE LEGS WORKING
-            {
-                state = ERROR;
-                break;
-            }
-            myStrobe.init();
-            state = WAIT;
-            nextState = LOWER;
-            setTimer(); //SO WAIT STATE STARTS WITH TIMER AT 0
-            break;
-
-        //WAIT: WAIT UNTIL TIME TO DO nextState
-        //      IF BUTTON PRESS, MOVE TO NEXT STATE NOW
-        case WAIT:
-            if (getTimer() >= 100)
-            {
-                longTime++;
-                setTimer();
-
-            }
-            if (myButton.read()) forceNextState = 1;
-
-            switch (nextState)
-            {
-            case INTERMISSION:
-                if (longTime >= INTERMISSION_PAUSE_LONG || forceNextState)
+                LED_OFF();
+                if (myBlade.init() == Blade::ERROR)        //MOVE BLADE TO UP POSITION
                 {
-                    state = LOWER;
-                    longTime = 0;
-                    forceNextState = 0;
+                    state = ERROR;
+                    break;
                 }
-            case LOWER:
-                if (longTime >= CHOP_PAUSE_LONG || forceNextState)
+
+
+                else if (myHead.init() == Head::ERROR)   //MOVE HEAD TILT ROD TO HOME POSITION
                 {
-                    state = LOWER;
-                    longTime = 0;
-                    forceNextState = 0;
+                    state = ERROR;
+                    break;
                 }
-                break;
 
-            case ENDBODYTWITCH:
-                if (longTime >= HEAD_TILT_PAUSE_LONG || forceNextState)
+                else if (myBody.init() == Body::ERROR)    //MAKE SURE LEGS WORKING
                 {
-                    state = HEADTILT;
-                    longTime = 0;
-                    forceNextState = 0;
+                    state = ERROR;
+                    break;
                 }
-                break;
-
-            case RAISE:
-                if (longTime >= RAISE_PAUSE_LONG  || forceNextState)
-                {
-                    state = RAISE;
-                    longTime = 0;
-                    forceNextState = 0;
-                }
-                break;
-
-            case HEADRAISE:
-                if (longTime >= HEAD_RAISE_PAUSE_LONG || forceNextState)
-                {
-                    state = HEADRAISE;
-                    longTime = 0;
-                    forceNextState = 0;
-                }
-                break;
-
-            case HEADTILT:
-                if (longTime >= HEAD_TILT_PAUSE_LONG || forceNextState)
-                {
-                    state = HEADTILT;
-                    longTime = 0;
-                    forceNextState = 0;
-                }
-                break;
-
-            case LOWERTILTROD:
-                if (longTime >= HEAD_TILT_PAUSE_LONG || forceNextState)
-                {
-                    state = HEADTILT;
-                    longTime = 0;
-                    forceNextState = 0;
-                }
-                break;
-
-            case LOWERHOIST:
-                if (longTime >= HEAD_TILT_PAUSE_LONG || forceNextState)
-                {
-                    state = HEADTILT;
-                    longTime = 0;
-                    forceNextState = 0;
-                }
-                break;
-
-            }
-            break;
-
-        case CHECK:
-
-            break;
-
-        case INTERMISSION:
-
-            break;
-
-        case LOWER:
-            if (myBlade.checkIfUp())
-            {
-                myBlade.lowerBlade();
-                state = CHECKLOWER;
-
-            }
-            else state = ERROR;
-            break;
-
-        case CHECKLOWER:
-            ////TODO: check if takes too long
-            if (myBlade.checkIfDown())
-            {
-                state = HEADLOWER;
-            }
-            break;
-
-        case HEADLOWER:
-            ////Lower head
-            //if lowered
-            state = CHECKHDLOWER;
-            break;
-
-        case CHECKHDLOWER:
-            //if LOWERED
-            state = WAIT;
-            nextState = RAISE;
-            break;
-
-        case BODYTWITCH:
-            //if LOWERED
-            state = WAIT;
-            nextState = RAISE;
-            break;
-
-        case ENDBODYTWITCH:
-            //if LOWERED
-            state = WAIT;
-            nextState = RAISE;
-            break;
-
-        case RAISE:
-            if (myBlade.checkIfDown())
-            {
-                myBlade.raiseBlade();
-                setTimer();
-                state = CHECKRAISE;
-
-            }
-            else state = ERROR;
-            break;
-
-        case CHECKRAISE:
-            if (getTimer() >= BLADE_UP_MAX_TIME)
-            {
-                state = ERROR;
-                break;
-            }
-            if (myBlade.checkIfUp())
-            {
-                setTimer();
-                while (getTimer() < BLADE_MTR_PAUSE_TOP)
-                {
-                    if (myButton.read()) break; //check for button, if so stop motor push
-                }
-                myBlade.motorOff();
+                myStrobe.init();
                 state = WAIT;
-                nextState = LOWER;  //HEADRAISE
-                longTime = 0;
+                nextState = LOWER;
+                nextWaitTime = CHOP_PAUSE_LONG;
+                setTimer(); //SO WAIT STATE STARTS WITH TIMER AT 0
+                break;
             }
+            //WAIT: WAIT UNTIL TIME TO DO nextState
+            //      IF BUTTON PRESS, MOVE TO NEXT STATE NOW
 
-            break;
+            case WAIT:
+                if (getTimer() >= 50)
+                {
+                    longTime++;
+                    setTimer();
+                }
+                forceNextState = myButton.read();
+                if (longTime >= nextWaitTime || forceNextState)
+                {
+                    state = RUN;
+                    longTime = 0;
+                }
+                break;
+            case RUN:
+            {
+                switch (nextState)
+                {
+                case LOWER:
+                    pollState = 0;
+                    myBlade.lowerBladePoll(Blade::RESET);
+                    while (pollState != Blade::COMPLETE || pollState != Blade::ERROR)
+                    {
+                        pollState = myBlade.raiseBladePoll();
+                        if(myButton.read())
+                        {
+                            pollState = Blade::ERROR;
+                            break;
+                        }
+                    }
+                    if (pollState == Blade::ERROR) state = ERROR;
 
-        case HEADRAISE:
+                    ////GOTO NEXT STATE AND SETUP NEXT EVENT
+                    else
+                    {
+                        state = WAIT;
+                        nextState = HEADLOWER;
+                        nextWaitTime = HEAD_DROP_PAUSE_LONG;
+                    }
+                    break;
 
-            break;
+                case HEADLOWER:
+                    pollState = 0;
+                    myHead.lowerHeadPoll(Head::RESET);
+                    while (pollState != Head::COMPLETE || pollState != Head::ERROR)
+                    {
+                        pollState = myHead.lowerHeadPoll();
+                        if(myButton.read())
+                        {
+                            pollState = Head::ERROR;
+                            break;
+                        }
+                    }
+                    if (pollState == Head::ERROR) state = ERROR;
 
-        case CHECKHDRAISE:
+                    ////GOTO NEXT STATE AND SETUP NEXT EVENT
+                    else
+                    {
+                        state = WAIT;
+                        nextState = BODYTWITCH;
+                        nextWaitTime = BODY_TWITCH_START_PAUSE_LONG;
+                    }
+                    break;
 
-            break;
+                case BODYTWITCH:
+                    pollState = 0;
+                    myBody.bodyKickPoll(Body::RESET);
+                    while (pollState != Body::COMPLETE || pollState != Body::ERROR)
+                    {
+                        pollState = myBody.bodyKickPoll();
+                        if(myButton.read())
+                        {
+                            pollState = Body::ERROR;
+                            break;
+                        }
+                    }
+                    if (pollState == Body::ERROR) state = ERROR;
 
-        case HEADTILT:
-            ////Lower head
-            //if lowered
-            state = CHECKHDLOWER;
-            break;
+                    ////GOTO NEXT STATE AND SETUP NEXT EVENT
+                    else
+                    {
+                        state = WAIT;
+                        nextState = INTERMISSION1;
+                        nextWaitTime = INTERMISSION1_PAUSE_LONG;
+                    }
+                    break;
 
-        case CHECKHDTILT:
+                case INTERMISSION1:
+                    //while do something during intermissioon
 
-            break;
+                    state = WAIT;
+                    nextState = RAISE;
+                    nextWaitTime = RAISE_PAUSE_LONG;
+                    break;
 
-        case LOWERTILTROD:
-            ////Lower head
-            //if lowered
-            state = CHECKHDLOWER;
-            break;
+                case RAISE:
+                    pollState = 0;
+                    myBlade.raiseBladePoll(Blade::RESET);
+                    while (pollState != Blade::COMPLETE || pollState != Blade::ERROR)
+                    {
+                        pollState = myBlade.raiseBladePoll();
+                        if(myButton.read())
+                        {
+                            pollState = Head::ERROR;
+                            break;
+                        }
+                    }
+                    if (pollState == Blade::ERROR) state = ERROR;
 
-        case CHECKLOWERTILTROD:
+                    ////GOTO NEXT STATE AND SETUP NEXT EVENT
+                    else
+                    {
+                        state = WAIT;
+                        nextState = HEADRAISE;
+                        nextWaitTime = HEAD_RAISE_PAUSE_LONG;
+                    }
+                    break;
 
-            break;
+                case HEADRAISE:
+                    pollState = 0;
+                    myHead.raiseHeadPoll(Head::RESET);
+                    while (pollState != Head::COMPLETE || pollState != Head::ERROR)
+                    {
+                        pollState = myHead.raiseHeadPoll();
+                        if(myButton.read())
+                        {
+                            pollState = Head::ERROR;
+                            break;
+                        }
+                    }
+                    if (pollState == Head::ERROR) state = ERROR;
 
-        case LOWERHOIST:
+                    ////GOTO NEXT STATE AND SETUP NEXT EVENT
+                    else
+                    {
+                        state = WAIT;
+                        nextState = HEADTILT;
+                        nextWaitTime = HEAD_TILT_PAUSE_LONG;
+                    }
+                    break;
 
-            break;
+                case HEADTILT:
+                    pollState = 0;
+                    myHead.tiltHeadUpPoll(Head::RESET);
+                    while (pollState != Head::COMPLETE || pollState != Head::ERROR)
+                    {
+                        pollState = myHead.tiltHeadUpPoll();
+                        if(myButton.read())
+                        {
+                            pollState = Head::ERROR;
+                            break;
+                        }
+                    }
+                    if (pollState == Head::ERROR) state = ERROR;
 
-        case CHECKLOWERHOIST:
+                    ////GOTO NEXT STATE AND SETUP NEXT EVENT
+                    else
+                    {
+                        state = WAIT;
+                        nextState = LOWERTILTROD;
+                        nextWaitTime = LOWER_TILT_ROD_PAUSE_LONG;
+                    }
+                    break;
 
-            break;
+                case LOWERTILTROD:
+                    pollState = 0;
+                    myHead.tiltRodDownPoll(Head::RESET);
+                    while (pollState != Head::COMPLETE || pollState != Head::ERROR)
+                    {
+                        pollState = myHead.tiltRodDownPoll();
+                        if(myButton.read())
+                        {
+                            pollState = Head::ERROR;
+                            break;
+                        }
+                    }
+                    if (pollState == Head::ERROR) state = ERROR;
 
-        case STROBEON:
+                    ////GOTO NEXT STATE AND SETUP NEXT EVENT
+                    else
+                    {
+                        state = WAIT;
+                        nextState = LOWERHOIST;
+                        nextWaitTime = LOWER_HOIST_PAUSE_LONG;
+                    }
+                    break;
 
-            break;
+                case LOWERHOIST:
+                    pollState = 0;
+                    myHead.lowerHoistPoll(Head::RESET);
+                    while (pollState != Head::COMPLETE || pollState != Head::ERROR)
+                    {
+                        pollState = myHead.lowerHoistPoll();
+                        if(myButton.read())
+                        {
+                            pollState = Head::ERROR;
+                            break;
+                        }
+                    }
+                    if (pollState == Head::ERROR) state = ERROR;
 
-        case STROBEOFF:
+                    ////GOTO NEXT STATE AND SETUP NEXT EVENT
+                    else
+                    {
+                        state = WAIT;
+                        nextState = INTERMISSION2;
+                        nextWaitTime = INTERMISSION2_PAUSE_LONG;
+                    }
+                    break;
 
-            break;
+                case INTERMISSION2:
+                    //while do something during intermissioon
 
-        case ERROR:
-            LED_ON();
-            myBlade.motorOff();
-            myBlade.lowerBlade();
-            myHead.motorOff();
-            myHead.tiltOff();
-            //Body off
-            //Strobe off
-            //Music off
-
-            break;
+                    state = WAIT;
+                    nextState = LOWER;
+                    nextWaitTime = CHOP_PAUSE_LONG;
+                    break;
+                }
+                break;
+            }
+            case ERROR:
+                LED_ON();
+                myBlade.turnOff();
+                myHead.turnOff();
+                myBody.turnOff();
+                myStrobe.strobeOff();
+                //Music off
+                if (myButton.read()) state = INIT;
+                break;
         }
             break;
 
-        case 1:
-            DBSerial.println(const_cast <char*> ("DBMode"));
+        case SERIAL_DEBUG:
+            DBSerial.println(const_cast <char*> ("[--DBMode--]"));
 
-            while (debugMode || !myButton.read())
+            myBlade.printDebug(&DBSerial);
+            myHead.printDebug(&DBSerial);
+            myBody.printDebug(&DBSerial);
+
+            while (debugMode == SERIAL_DEBUG || !myButton.read())
             {
+                if (DBSerial.available())
+                {
+                    switch (DBSerial.read())
+                    {
+                    case 'd':
+                        debugMode = NORMAL;
+                        break;
 
+                    case 'e':
+                        myBlade.printDebug(&DBSerial);
+                        myHead.printDebug(&DBSerial);
+                        myBody.printDebug(&DBSerial);
+                        break;
+
+                    case 32: //SPACEBAR
+                        DBSerial.println(const_cast <char*> ("[B]lade up / [b]lade down"));
+                        DBSerial.println(const_cast <char*> ("[M]ag on / [m]ag off"));
+                        DBSerial.println(const_cast <char*> ("[H]ead up / [h]ead down"));
+                        DBSerial.println(const_cast <char*> ("h[O]ist down"));
+                        DBSerial.println(const_cast <char*> ("[T]ilt up / [t]ilt down"));
+                        DBSerial.println(const_cast <char*> ("head [R]elease on / [r]elease off"));
+                        DBSerial.println(const_cast <char*> ("bod[Y] on / bod[y] off"));
+                        DBSerial.println(const_cast <char*> ("[S]trobe on / [s]trobe off"));
+                        DBSerial.println(const_cast <char*> ("[L]ed on / [l]ed off"));
+                        DBSerial.println(const_cast <char*> ("m[U]sic on / m[u]sic off"));
+                        DBSerial.println(const_cast <char*> ("[N]ext track / [P]rev track"));
+                        DBSerial.println(const_cast <char*> ("d[e]bug info"));
+
+                        break;
+
+                    case 'B':
+                        DBSerial.print(const_cast <char*> ("Blade Up.."));
+                        myBlade.raiseBladePoll(Blade::RESET);
+                        while (pollState != Blade::COMPLETE || pollState != Blade::ERROR) pollState = myBlade.raiseBladePoll();
+                        if (pollState == Blade::COMPLETE) DBSerial.println(const_cast <char*> ("Good"));
+                        else DBSerial.println(const_cast <char*> ("Error"));
+                        break;
+
+                    case 'b':
+                        DBSerial.print(const_cast <char*> ("Blade Down.."));
+                        myBlade.lowerBladePoll(Blade::RESET);
+                        while (pollState != Blade::COMPLETE || pollState != Blade::ERROR) pollState = myBlade.lowerBladePoll();
+                        if (pollState == Blade::COMPLETE) DBSerial.println(const_cast <char*> ("Good"));
+                        else DBSerial.println(const_cast <char*> ("Error"));
+                        break;
+
+                    case 'M':
+                        DBSerial.println(const_cast <char*> ("Mag On"));
+                        myBlade.mag(1);
+                        break;
+
+                    case 'm':
+                        DBSerial.println(const_cast <char*> ("Mag Off"));
+                        myBlade.mag(0);
+                        break;
+
+                    case 'H':
+                        DBSerial.print(const_cast <char*> ("Head Up.."));
+                        myHead.raiseHeadPoll(Head::RESET);
+                        while (pollState != Head::COMPLETE || pollState != Head::ERROR) pollState = myHead.raiseHeadPoll();
+                        if (pollState == Head::COMPLETE) DBSerial.println(const_cast <char*> ("Good"));
+                        else DBSerial.println(const_cast <char*> ("Error"));
+                        break;
+
+                    case 'h':
+                        DBSerial.print(const_cast <char*> ("Head Down.."));
+                        myHead.lowerHeadPoll(Head::RESET);
+                        while (pollState != Head::COMPLETE || pollState != Head::ERROR) pollState = myHead.lowerHeadPoll();
+                        if (pollState == Head::COMPLETE) DBSerial.println(const_cast <char*> ("Good"));
+                        else DBSerial.println(const_cast <char*> ("Error"));
+                        break;
+
+                    case 'O':
+                        DBSerial.print(const_cast <char*> ("Hoist Down.."));
+                        myHead.lowerHoistPoll(Head::RESET);
+                        while (pollState != Head::COMPLETE || pollState != Head::ERROR) pollState = myHead.lowerHoistPoll();
+                        if (pollState == Head::COMPLETE) DBSerial.println(const_cast <char*> ("Good"));
+                        else DBSerial.println(const_cast <char*> ("Error"));
+                        break;
+
+                    case 'T':
+                        DBSerial.print(const_cast <char*> ("Tilt Up.."));
+                        myHead.tiltHeadUpPoll(Head::RESET);
+                        while (pollState != Head::COMPLETE || pollState != Head::ERROR) pollState = myHead.tiltHeadUpPoll();
+                        if (pollState == Head::COMPLETE) DBSerial.println(const_cast <char*> ("Good"));
+                        else DBSerial.println(const_cast <char*> ("Error"));
+                        break;
+
+                    case 't':
+                        DBSerial.print(const_cast <char*> ("Tilt Down.."));
+                        myHead.tiltRodDownPoll(Head::RESET);
+                        while (pollState != Head::COMPLETE || pollState != Head::ERROR) pollState = myHead.tiltRodDownPoll();
+                        if (pollState == Head::COMPLETE) DBSerial.println(const_cast <char*> ("Good"));
+                        else DBSerial.println(const_cast <char*> ("Error"));
+                        break;
+
+                    case 'R':
+                        DBSerial.print(const_cast <char*> ("Solenoid On"));
+                        myHead.sol(1);
+                        break;
+
+                    case 'r':
+                        DBSerial.print(const_cast <char*> ("Solenoid Off"));
+                        myHead.sol(0);
+                        break;
+
+                    case 'Y':
+                        DBSerial.print(const_cast <char*> ("Body On.."));
+                        if (myBody.bodyOn()) DBSerial.println(const_cast <char*> ("Error"));
+                        else DBSerial.println(const_cast <char*> ("Good"));
+                        break;
+
+                    case 'y':
+                        DBSerial.print(const_cast <char*> ("Body Off.."));
+                        if (myBody.bodyOn(0)) DBSerial.println(const_cast <char*> ("Error"));
+                        else DBSerial.println(const_cast <char*> ("Good"));
+                        myBody.turnOff();
+                        break;
+
+                    case 'S':
+                        DBSerial.print(const_cast <char*> ("Strobe On"));
+                        myStrobe.strobeOn();
+                        break;
+
+                    case 's':
+                        DBSerial.print(const_cast <char*> ("Strobe Off"));
+                        myStrobe.strobeOff();
+                        break;
+
+                    case 'L':
+                        DBSerial.print(const_cast <char*> ("LED On"));
+                        LED_ON();
+                        break;
+
+                    case 'l':
+                        DBSerial.print(const_cast <char*> ("LED Off"));
+                        LED_OFF();
+                        break;
+                    }
+                }
             }
-            debugMode = 0;
             state = INIT;
             break;
         }
     }
-
 }
 ISR (TIMER2_COMPA_vect)
 {

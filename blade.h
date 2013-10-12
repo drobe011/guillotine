@@ -3,6 +3,7 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <debug/debugserial.h>
 
 #define BLADE_UP_PORT PORTB
 #define BLADE_UP_DDR DDRB
@@ -24,16 +25,18 @@ class Blade
     public:
         Blade(volatile uint16_t * ptr_T);
         uint8_t init();
+        uint8_t raiseBladePoll(uint8_t = 0);
+        uint8_t lowerBladePoll(uint8_t = 0);
         void raiseBlade();
-        void lowerBlade();
-        void motorOff();
-        uint8_t checkIfUp();
-        uint8_t checkIfDown();
-
+        void turnOff();
+        void printDebug(DebugSerial *);
+        void mag(uint8_t);
+        enum {ERROR, DONE, COMPLETE, WORKING, NOT_STARTED, RESET};
     protected:
     private:
         volatile uint16_t * ptr_Timer;
-        __inline__ void setTimer(uint16_t tm = 0)
+        uint8_t bladeStatus;
+        __inline__ void setTimer(uint16_t tm = RESET)
         {
             cli();
             *ptr_Timer = tm;

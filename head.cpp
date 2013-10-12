@@ -1,7 +1,7 @@
 #include "head.h"
 
 Head::Head(volatile uint16_t * ptr_T) :
-    ptr_Timer(ptr_T)
+    ptr_Timer(ptr_T), status(NOT_STARTED)
 {
     CONFIG_HOIST();
     CONFIG_RELEASE();
@@ -13,6 +13,7 @@ Head::Head(volatile uint16_t * ptr_T) :
     configHoistTimer();
     configTiltTimer();
 }
+
 void Head::configHoistTimer()
 {
     //SETUP PWM TIMER
@@ -27,163 +28,211 @@ void Head::configTiltTimer()
     TCCR0B = _BV(CS00) | _BV(CS02);     //1024  30hz with OCR0A=255
     OCR0A = 255;
 }
-////init() return 0: error, 1: moved up, 2: already up and hoist already down
-uint8_t Head::init(uint8_t mode)
-{
-    uint8_t ret = 0;
 
-    ////INITIALIZE TILT MECH TO HOME; return 0 on error, 1 moved to home, 2 already home
-    if (mode == 0)
-    {
-        if (IS_TILT_DOWN()) return 2;
-        else
-        {
-            tiltHeadDown();
-            setTimer();
-            while (!IS_TILT_DOWN())
-            {
-                if (getTimer() > TILT_DOWN_MAX_TIME)
-                {
-                    tiltOff();
-                    return 0;
-                }
-            }
-            tiltOff();
-            return 1;
-        }
-    }
+uint8_t Head::init()
+{
+    uint8_t pollState = 0;
 
-    else if (mode == 1)
+    tiltRodDownPoll(RESET);
+    while (pollState != COMPLETE || pollState != ERROR) pollState = tiltRodDownPoll();
+    if (pollState == ERROR) return pollState;
+
+    raiseHeadPoll(RESET);
+    while (pollState != COMPLETE || pollState != ERROR) pollState = raiseHeadPoll();
+    if (pollState == ERROR) return pollState;
+
+    tiltHeadUpPoll(RESET);
+    while (pollState != COMPLETE || pollState != ERROR) pollState = tiltHeadUpPoll();
+    if (pollState == ERROR) return pollState;
+
+    tiltRodDownPoll(RESET);
+    while (pollState != COMPLETE || pollState != ERROR) pollState = tiltRodDownPoll();
+    if (pollState == ERROR) return pollState;
+
+    lowerHoistPoll(RESET);
+    while (pollState != COMPLETE || pollState != ERROR) pollState = lowerHoistPoll();
+    if (pollState == ERROR) return pollState;
+
+    return pollState;
+}
+uint8_t Head::raiseHeadPoll(uint8_t reset)
+{
+    if (reset == RESET) status = NOT_STARTED;
+
+    switch (status)
     {
-        ////CHECK IF HEAD UP
-        if (IS_HEAD_UP())
-        {
-            ////HEAD UP, CHECK IF TILTED UP
-            if (IS_TILT_UP()) ret = 2;
-            ////HEAD UP, TILT IS DOWN, MOVE TILT UP
-            else
-            {
-                tiltHeadUp();
-                setTimer();
-                while (!IS_TILT_UP())
-                {
-                    if (getTimer() > TILT_UP_MAX_TIME)
-                    {
-                        tiltOff();
-                        return 0;
-                    }
-                }
-                tiltOff();
-                ret = 1;
-            }
-        }
-        ////HEAD DOWN, MOVE HEAD UP
+    case NOT_STARTED: //first time polled
+        if (IS_HEAD_UP()) status = DONE;
         else
         {
-            raiseHead();
+            OCR1A = 100;
+            DIR_FORWARD();
+            HOIST_ON();
             setTimer();
-            while (!IS_HEAD_UP())
-            {
-                if (getTimer() > HEAD_UP_MAX_TIME || IS_HOIST_FAULT())
-                {
-                    motorOff();
-                    return 0;
-                }
-            }
-            motorOff();
-            ////HEAD UP, MOVE TILT UP
-            tiltHeadUp();
-            setTimer();
-            while (!IS_TILT_UP())
-            {
-                if (getTimer() > TILT_UP_MAX_TIME)
-                {
-                    tiltOff();
-                    return 0;
-                }
-            }
-            tiltOff();
-            ret = 1;
+            status = WORKING;
         }
-        if (IS_HOIST_DOWN()) ret = 2;
-        else
-        {
-            lowerHoist();
-            setTimer();
-            while (!IS_HOIST_DOWN())
-            {
-                if (getTimer() > HOIST_DOWN_MAX_TIME || IS_HOIST_FAULT())
-                {
-                    motorOff();
-                    return 0;
-                }
-            }
-            motorOff();
-            ret = 1;
-        }
-        return ret;
+        break;
+    case WORKING:
+        if (IS_HEAD_UP()) status = DONE;
+        else if (getTimer() > HEAD_UP_MAX_TIME) status = ERROR;
+        break;
+    case DONE:
+        HOIST_OFF();
+        OCR1A = 0;
+        break;
+    case ERROR:
+        turnOff();
+        break;
     }
+    return status;
 }
-void Head::raiseHead()
+uint8_t Head::lowerHeadPoll(uint8_t reset)
 {
-    OCR1A = 100;
-    DIR_FORWARD();
-    HOIST_ON();
+   if (reset == RESET) status = NOT_STARTED;
+
+    switch (status)
+    {
+    case NOT_STARTED: //first time polled
+        if (IS_HEAD_DOWN()) status = DONE;
+        else
+        {
+            setTimer();
+            RELEASE_ON();
+            while (getTimer() < RELEASE_ON_MAX_TIME);
+            RELEASE_OFF();
+            status = WORKING;
+        }
+        break;
+    case WORKING:
+        if (IS_HEAD_DOWN()) status = DONE;
+        else if (getTimer() > HEAD_DOWN_MAX_TIME) status = ERROR;
+        break;
+    case DONE:
+        status = COMPLETE;
+        break;
+    case ERROR:
+        turnOff();
+        break;
+    }
+    return status;
 }
-void Head::lowerHead()
+uint8_t Head::lowerHoistPoll(uint8_t reset)
 {
-    setTimer();
-    RELEASE_ON();
-    while (getTimer() < 50);
-    RELEASE_OFF();
+   if (reset == RESET) status = NOT_STARTED;
+
+    switch (status)
+    {
+    case NOT_STARTED: //first time polled
+        if (IS_HOIST_DOWN()) status = DONE;
+        else
+        {
+            OCR1A = 200;
+            DIR_REVERSE();
+            HOIST_ON();
+            status = WORKING;
+        }
+        break;
+    case WORKING:
+        if (IS_HOIST_DOWN()) status = DONE;
+        else if (getTimer() > HOIST_DOWN_MAX_TIME) status = ERROR;
+        break;
+    case DONE:
+        HOIST_OFF();
+        OCR1A = 0;
+        status = COMPLETE;
+        break;
+    case ERROR:
+        turnOff();
+        break;
+    }
+    return status;
 }
-void Head::lowerHoist()
-{
-    OCR1A = 200;
-    DIR_REVERSE();
-    HOIST_ON();
-}
-void Head::motorOff()
+void Head::turnOff()
 {
     OCR1A = 0;
     HOIST_OFF();
-}
-void Head::tiltHeadUp()
-{
-    TILT_UP();
-    TILT_ON();
-}
-void Head::tiltHeadDown()
-{
-    TILT_DOWN();
-    TILT_ON();
-}
-void Head::tiltOff()
-{
     TILT_OFF();
 }
-uint8_t Head::checkIfUp()
+uint8_t Head::tiltHeadUpPoll(uint8_t reset)
 {
-    if (IS_HEAD_UP()) return 1;
-    else return 0;
+   if (reset == RESET) status = NOT_STARTED;
+
+    switch (status)
+    {
+    case NOT_STARTED: //first time polled
+        if (IS_TILT_UP()) status = DONE;
+        else
+        {
+            TILT_UP();
+            TILT_ON();
+            status = WORKING;
+        }
+        break;
+    case WORKING:
+        if (IS_TILT_UP()) status = DONE;
+        else if (getTimer() > TILT_UP_MAX_TIME) status = ERROR;
+        break;
+    case DONE:
+        TILT_OFF();
+        status = COMPLETE;
+        break;
+    case ERROR:
+        turnOff();
+        break;
+    }
+    return status;
 }
-uint8_t Head::checkIfDown()
+uint8_t Head::tiltRodDownPoll(uint8_t reset)
 {
-    if (IS_HEAD_DOWN()) return 1;
-    else return 0;
+   if (reset == RESET) status = NOT_STARTED;
+
+    switch (status)
+    {
+    case NOT_STARTED: //first time polled
+        if (IS_TILT_DOWN()) status = DONE;
+        else
+        {
+            TILT_DOWN();
+            TILT_ON();
+            status = WORKING;
+        }
+        break;
+    case WORKING:
+        if (IS_TILT_DOWN()) status = DONE;
+        else if (getTimer() > TILT_UP_MAX_TIME) status = ERROR;
+        break;
+    case DONE:
+        TILT_OFF();
+        status = COMPLETE;
+        break;
+    case ERROR:
+        turnOff();
+        break;
+    }
+    return status;
 }
-uint8_t Head::checkIfHoistDown()
+
+void Head::printDebug(DebugSerial *dbSerial)
 {
-    if (IS_HOIST_DOWN()) return 1;
-    else return 0;
+    dbSerial->print(const_cast <char*>("Head: "));
+    if (IS_HEAD_UP()) dbSerial->print(const_cast <char*>("UP, "));
+    else if (IS_HEAD_DOWN()) dbSerial->print(const_cast <char*>("DN, "));
+
+    dbSerial->print(const_cast <char*>("Tilt: "));
+    if (IS_TILT_UP()) dbSerial->print(const_cast <char*>("UP, "));
+    else if (IS_TILT_DOWN()) dbSerial->print(const_cast <char*>("DN, "));
+
+    dbSerial->print(const_cast <char*>("Hoist: "));
+    if (IS_HOIST_DOWN()) dbSerial->print(const_cast <char*>("DN, "));
+    else dbSerial->print(const_cast <char*>("UP, "));
+
+    dbSerial->print(const_cast <char*>("Motor Fault:"));
+    if (IS_HOIST_FAULT()) dbSerial->println(const_cast <char*>(" Y"));
+    else dbSerial->println(const_cast <char*>(" N"));
 }
-uint8_t Head::checkIfTiltUp()
+
+void Head::sol(uint8_t state)
 {
-    if (IS_TILT_UP()) return 1;
-    else return 0;
-}
-uint8_t Head::checkIfTiltDown()
-{
-    if (IS_TILT_DOWN()) return 1;
-    else return 0;
+    if (state) RELEASE_ON();
+    else RELEASE_OFF();
 }
