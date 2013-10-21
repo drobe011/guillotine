@@ -17,8 +17,9 @@
 #define BODY_FAULT_PORT PINB
 #define BODY_FAULT_PIN 2
 
-#define DEFAULT_DUTY 200
-#define BODY_INIT_LENGTH 500
+#define DEFAULT_DUTY 255
+#define BODY_INIT_LENGTH 100
+#define BODY_KICK_LENGTH 200
 
 class Body
 {

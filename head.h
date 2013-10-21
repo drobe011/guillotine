@@ -5,12 +5,16 @@
 #include <avr/interrupt.h>
 #include <debug/debugserial.h>
 
-#define HEAD_UP_MAX_TIME 500
+#define HEAD_UP_MAX_TIME 1500
 #define HEAD_DOWN_MAX_TIME 200
-#define HOIST_DOWN_MAX_TIME 300
-#define TILT_UP_MAX_TIME 300
-#define TILT_DOWN_MAX_TIME 300
+#define HOIST_DOWN_MAX_TIME 1500
+#define TILT_UP_MAX_TIME 600
+#define TILT_DOWN_MAX_TIME 600
 #define RELEASE_ON_MAX_TIME 50
+
+#define TILT_SPEED_UP 127
+#define TILT_SPEED_DN 50
+#define TILT_MTR_BRAKE_HOLD 50
 
 #define HOIST_PORT PORTD
 #define HOIST_DDR DDRD
@@ -29,15 +33,19 @@
 #define TILT_PORT PORTB
 #define TILT_DDR DDRB
 #define TILT_PIN 3
-#define TILT_DIR_PORT PORTA
-#define TILT_DIR_DDR DDRA
-#define TILT_DIR_PIN 1
+#define TILT_IN2_PORT PORTA
+#define TILT_IN2_DDR DDRA
+#define TILT_IN2_PIN 1
+#define TILT_IN1_PORT PORTA
+#define TILT_IN1_DDR DDRA
+#define TILT_IN1_PIN 0
 #define TILT_EN_PORT PORTB
 #define TILT_EN_DDR DDRB
 #define TILT_EN_PIN 4
 //------------------------
 
 #define IS_HOIST_DOWN_PORT PIND
+#define IS_HOIST_DOWN_PU PORTD
 #define IS_HOIST_DOWN_PIN 6
 #define IS_HEAD_DOWN_PORT PINA
 #define IS_HEAD_DOWN_PIN 5
@@ -48,8 +56,10 @@
 
 //----------------------------
 #define IS_TILT_UP_PORT PINB
+#define IS_TILT_UP_PU PORTB
 #define IS_TILT_UP_PIN 7
 #define IS_TILT_DOWN_PORT PINB
+#define IS_TILT_DOWN_PU PORTB
 #define IS_TILT_DOWN_PIN 5
 //----------------------------
 
@@ -109,12 +119,18 @@ class Head
         }
         __inline__ void CONFIG_TILT_DIR()
         {
-            TILT_DIR_DDR |= _BV(TILT_DIR_PIN);
+            TILT_IN1_DDR |= _BV(TILT_IN1_PIN);
+            TILT_IN2_DDR |= _BV(TILT_IN2_PIN);
         }
         __inline__ void CONFIG_TILT_EN()
         {
             TILT_EN_DDR |= _BV(TILT_EN_PIN);
-            TILT_EN_PORT |= _BV(TILT_EN_PIN);
+        }
+        __inline__ void CONFIG_TILT_SNSRS()
+        {
+            IS_TILT_DOWN_PU |= _BV(IS_TILT_DOWN_PIN);
+            IS_TILT_UP_PU |= _BV(IS_TILT_UP_PIN);
+            IS_HOIST_DOWN_PU |= _BV(IS_HOIST_DOWN_PIN);
         }
         __inline__ void DIR_FORWARD()
         {
@@ -140,25 +156,35 @@ class Head
         {
             HOIST_ENABLE_PORT &= ~_BV(HOIST_ENABLE_PIN);
         }
-        __inline__ void TILT_ON()
+        __inline__ void TILT_OFF()
         {
             TILT_EN_PORT &= ~_BV(TILT_EN_PIN);
         }
-        __inline__ void TILT_OFF()
+        __inline__ void TILT_ON()
         {
             TILT_EN_PORT |= _BV(TILT_EN_PIN);
         }
-        __inline__ void TILT_UP()
-        {
-            TILT_DIR_PORT |= _BV(TILT_DIR_PIN);
-        }
         __inline__ void TILT_DOWN()
         {
-            TILT_DIR_PORT &= ~_BV(TILT_DIR_PIN);
+            TILT_IN2_PORT |= _BV(TILT_IN2_PIN);
+            TILT_IN1_PORT &= ~_BV(TILT_IN1_PIN);
+            OCR0A = TILT_SPEED_DN;
+        }
+        __inline__ void TILT_UP()
+        {
+            TILT_IN2_PORT &= ~_BV(TILT_IN2_PIN);
+            TILT_IN1_PORT |= _BV(TILT_IN1_PIN);
+            OCR0A = TILT_SPEED_UP;
         }
         __inline__ uint8_t IS_HOIST_DOWN()
         {
             return !(IS_HOIST_DOWN_PORT & _BV(IS_HOIST_DOWN_PIN));
+        }
+        __inline__ void TILT_BRAKE()
+        {
+            TILT_IN2_PORT |= _BV(TILT_IN2_PIN);
+            TILT_IN1_PORT |= _BV(TILT_IN1_PIN);
+            OCR0A = 255;
         }
         __inline__ uint8_t IS_HEAD_UP()
         {
@@ -174,11 +200,11 @@ class Head
         }
         __inline__ uint8_t IS_TILT_DOWN()
         {
-            return IS_TILT_DOWN_PORT & !(IS_TILT_DOWN_PIN);
+            return !(IS_TILT_DOWN_PORT & _BV(IS_TILT_DOWN_PIN));
         }
         __inline__ uint8_t IS_TILT_UP()
         {
-            return IS_TILT_UP_PORT & !(IS_TILT_UP_PIN);
+            return !(IS_TILT_UP_PORT & _BV(IS_TILT_UP_PIN));
         }
 
 };

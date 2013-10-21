@@ -11,21 +11,13 @@ Body::Body(volatile uint16_t * ptr_T) :
 
 uint8_t Body::init()
 {
-    for (uint8_t tempI = 0; tempI < 2; tempI++)
+    setTimer();
+    bodyOn(DEFAULT_DUTY, 0);
+    while (getTimer() < BODY_INIT_LENGTH)
     {
-        setTimer();
-        bodyOn(DEFAULT_DUTY, tempI);
-        while (getTimer() < (BODY_INIT_LENGTH / 2))
-        {
 
-        }
-        setTimer();
-        turnOff();
-        while (getTimer() < 50)
-        {
-
-        }
     }
+    turnOff();
     return COMPLETE;
 }
 
@@ -72,9 +64,10 @@ uint8_t Body::bodyKickPoll(uint8_t reset)
         bodyStatus = WORKING;
         break;
     case WORKING:
-        if (getTimer() > BODY_INIT_LENGTH || IS_BODY_FAULT()) bodyStatus = ERROR;
+        if (getTimer() > BODY_KICK_LENGTH) bodyStatus = DONE;
         break;
     case DONE:
+        turnOff();
         bodyStatus = COMPLETE;
         break;
     case ERROR:
@@ -86,7 +79,8 @@ uint8_t Body::bodyKickPoll(uint8_t reset)
 
 void Body::printDebug(DebugSerial *dbSerial)
 {
-    dbSerial->print(const_cast <char*>("Body Fault:"));
-    if (IS_BODY_FAULT()) dbSerial->println(const_cast <char*>(" Y"));
-    else dbSerial->println(const_cast <char*>(" N"));
+    dbSerial->print(const_cast <char*>("\n\rBody Fault: "));
+    if (IS_BODY_FAULT()) dbSerial->print(const_cast <char*>("Y"));
+    else dbSerial->print(const_cast <char*>("N"));
+    //dbSerial->println(const_cast <char*> ("how"));
 }

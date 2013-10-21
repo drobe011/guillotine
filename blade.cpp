@@ -51,10 +51,10 @@ void Blade::turnOff()
 
 uint8_t Blade::init()
 {
-    uint8_t pollState = 0;
+    uint8_t pollState = WORKING;
 
     raiseBladePoll(RESET);
-    while (pollState != COMPLETE || pollState != ERROR) pollState = raiseBladePoll();
+    while (pollState != COMPLETE && pollState != ERROR) pollState = raiseBladePoll();
     return pollState;
 }
 
@@ -70,30 +70,53 @@ uint8_t Blade::raiseBladePoll(uint8_t reset)
         {
             raiseBlade();
             setTimer();
+            pulseTimer = 0;
+            pulseState = 2;
             bladeStatus = WORKING;
         }
         break;
     case WORKING:
         if (IS_BLADE_UP()) bladeStatus = DONE;
-        else if (getTimer() > BLADE_UP_MAX_TIME) bladeStatus = ERROR;
+        else if (getTimer() > BLADE_UP_MAX_TIME)
+        {
+            turnOff();
+            bladeStatus = ERROR;
+        }
+        else if (pulseState == 2 && getTimer() - pulseTimer >= 30)
+        {
+            pulseTimer = getTimer();
+            pulseState = 0;
+            //BLADE_MOTOR_OFF();bb
+        }
+        else if (pulseState == 1 && getTimer() - pulseTimer >= 10)  //20
+        {
+            pulseTimer = getTimer();
+            pulseState = 0;
+            BLADE_MOTOR_OFF();
+        }
+        else if (pulseState == 0 && getTimer() - pulseTimer >= 10)  //8
+        {
+            pulseTimer = getTimer();
+            pulseState = 1;
+            BLADE_MOTOR_ON();
+        }
         break;
     case DONE:
+        BLADE_MOTOR_ON();
         setTimer();
         while (getTimer() < BLADE_MTR_PAUSE_TOP);
         BLADE_MOTOR_OFF();
         bladeStatus = COMPLETE;
-        break;
-    case ERROR:
-        turnOff();
         break;
     }
     return bladeStatus;
 }
 void Blade::printDebug(DebugSerial *dbSerial)
 {
-    dbSerial->print(const_cast <char*>("Blade: "));
-    if (IS_BLADE_UP()) dbSerial->println(const_cast <char*>("UP"));
-    else if (IS_BLADE_DOWN()) dbSerial->println(const_cast <char*>("DN"));
+    dbSerial->print(const_cast <char*>("\n\rBlade: "));
+    if (IS_BLADE_UP()) dbSerial->print(const_cast <char*>("UP"));
+    else if (IS_BLADE_DOWN()) dbSerial->print(const_cast <char*>("DN"));
+    else dbSerial->print(const_cast <char*>("LIMBO"));
 }
 void Blade::mag(uint8_t state)
 {
