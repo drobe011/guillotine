@@ -36,9 +36,6 @@ uint8_t Blade::lowerBladePoll(uint8_t reset)
     case DONE:
         bladeStatus = COMPLETE;
         break;
-    case ERROR:
-        turnOff();
-        break;
     }
     return bladeStatus;
 }
@@ -82,7 +79,7 @@ uint8_t Blade::raiseBladePoll(uint8_t reset)
             turnOff();
             bladeStatus = ERROR;
         }
-        else if (pulseState == 2 && getTimer() - pulseTimer >= 30)
+        else if (pulseState == 2 && getTimer() - pulseTimer >= 31)
         {
             pulseTimer = getTimer();
             pulseState = 0;
@@ -94,7 +91,7 @@ uint8_t Blade::raiseBladePoll(uint8_t reset)
             pulseState = 0;
             BLADE_MOTOR_OFF();
         }
-        else if (pulseState == 0 && getTimer() - pulseTimer >= 10)  //8
+        else if (pulseState == 0 && getTimer() - pulseTimer >= 5)  //8
         {
             pulseTimer = getTimer();
             pulseState = 1;
@@ -102,9 +99,9 @@ uint8_t Blade::raiseBladePoll(uint8_t reset)
         }
         break;
     case DONE:
-        BLADE_MOTOR_ON();
-        setTimer();
-        while (getTimer() < BLADE_MTR_PAUSE_TOP);
+        //BLADE_MOTOR_ON();
+        //setTimer();
+        //while (getTimer() < BLADE_MTR_PAUSE_TOP);
         BLADE_MOTOR_OFF();
         bladeStatus = COMPLETE;
         break;

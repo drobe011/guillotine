@@ -30,6 +30,7 @@ class Body
         void turnOff();
         //uint8_t bodyReverse();
         uint8_t bodyKickPoll(uint8_t = 0);
+        void bodyTwitch();
         void printDebug(DebugSerial *);
         enum {ERROR, DONE, COMPLETE, WORKING, NOT_STARTED, RESET};
     protected:

@@ -77,6 +77,19 @@ uint8_t Body::bodyKickPoll(uint8_t reset)
     return bodyStatus;
 }
 
+void Body::bodyTwitch()
+{
+    uint8_t dirToggle = 0;
+    for (uint8_t loops = 145; loops < 155; loops++)
+    {
+        bodyOn(loops+100, dirToggle);
+        setTimer();
+        while (getTimer() < 15);
+        turnOff();
+        dirToggle ^= 1;
+    }
+    turnOff();
+}
 void Body::printDebug(DebugSerial *dbSerial)
 {
     dbSerial->print(const_cast <char*>("\n\rBody Fault: "));

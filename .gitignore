@@ -20,4 +20,10 @@ obj/
 *.layout
 *.depend
 *.cbp
+*.user
+*.creator
+*.config
+*.files
+*.includes
+
 

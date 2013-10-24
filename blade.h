@@ -16,9 +16,8 @@
 #define IS_BLADE_UP_PORT PINA
 #define IS_BLADE_UP_PIN 6
 
-#define BLADE_MTR_PAUSE_TOP 50
 #define BLADE_UP_MAX_TIME 300
-#define BLADE_DOWN_MAX_TIME 600
+#define BLADE_DOWN_MAX_TIME 300
 
 class Blade
 {
@@ -38,6 +37,7 @@ class Blade
         uint8_t bladeStatus;
         uint16_t pulseTimer;
         uint8_t pulseState;
+        uint8_t retries;
         __inline__ void setTimer(uint16_t tm = RESET)
         {
             cli();

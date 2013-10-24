@@ -171,6 +171,7 @@ uint8_t Head::tiltHeadUpPoll(uint8_t reset)
     {
     case NOT_STARTED: //first time polled
         if (IS_TILT_UP()) status = DONE;
+        else if (!IS_HEAD_UP()) status = ERROR;
         else
         {
             setTimer();

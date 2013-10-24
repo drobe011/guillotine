@@ -88,8 +88,8 @@ int main(void)
 
             switch (state)
             {
-        //INIT: SET GUILLOTINE TO DEFAULT POSITIONS
-        //      BLADE UP, HEAD UP, HEAD TILT UP
+            //INIT: SET GUILLOTINE TO DEFAULT POSITIONS
+            //      BLADE UP, HEAD UP, HEAD TILT UP
             case INIT:
             {
                 LED_OFF();
@@ -101,19 +101,16 @@ int main(void)
                     state = ERROR;
                     break;
                 }
-
-
                 else if (myHead.init() == Head::ERROR)   //MOVE HEAD TILT ROD TO HOME POSITION
                 {
                     state = ERROR;
                     break;
                 }
-
-////                else if (myBody.init() == Body::ERROR)    //MAKE SURE LEGS WORKING
-////                {
-////                    state = ERROR;
-////                    break;
-////                }
+                else if (myBody.init() == Body::ERROR)    //MAKE SURE LEGS WORKING
+                {
+                    state = ERROR;
+                    break;
+                }
                 myStrobe.init();
                 #ifdef SND_LEAVEINIT
                     myMusic.playHold(SND_LEAVEINIT, &myButton);
@@ -125,14 +122,13 @@ int main(void)
                 #ifdef SND_LOWER_BEFORE
                     myMusic.trigger(SND_LOWER_BEFORE);
                 #endif // SND_LOWER_BEFORE
-
                 break;
             }
             //WAIT: WAIT UNTIL TIME TO DO nextState
             //      IF BUTTON PRESS, MOVE TO NEXT STATE NOW
 
             case WAIT:
-                if (getTimer() >= 50)
+                if (getTimer() >= 50) //Increment longTime at 1/2 second interval
                 {
                     longTime++;
                     setTimer();
@@ -142,7 +138,6 @@ int main(void)
                 {
                     state = RUN;
                     longTime = 0;
-                    myMusic.stop();
                 }
                 break;
             case RUN:
@@ -167,9 +162,6 @@ int main(void)
                     if (pollState == Blade::ERROR)
                     {
                         state = ERROR;
-                    #ifdef DEBUG
-                        DBSerial.println(const_cast <char*> ("LOWERERROR"));
-                    #endif // DEBUG
                     }
 
                     ////GOTO NEXT STATE AND SETUP NEXT EVENT
@@ -223,6 +215,7 @@ int main(void)
                     #ifdef SND_BODY_ON
                         myMusic.trigger(SND_BODY_ON);
                     #endif // SND_BODY_ON
+                    myBody.bodyTwitch();
                     pollState = Body::WORKING;
                     myBody.bodyKickPoll(Body::RESET);
                     while (pollState != Body::COMPLETE && pollState != Body::ERROR)
@@ -256,7 +249,9 @@ int main(void)
                         myMusic.trigger(SND_INT1_ON);
                     #endif // SND_INT1_ON
 
-                    //while do something during intermissioon
+                    myStrobe.strobeOn();
+                    myBody.bodyTwitch();
+                    myStrobe.strobeOff();
 
                     #ifdef SND_INT1_AFTER
                         myMusic.trigger(SND_INT1_AFTER);
@@ -435,7 +430,9 @@ int main(void)
                         myMusic.trigger(SND_INT2_ON);
                     #endif // SND_INT2_ON
 
-                    //while do something during intermissioon
+                    myStrobe.strobeOn();
+                    myBody.bodyTwitch();
+                    myStrobe.strobeOff();
 
                     #ifdef SND_INT2_AFTER
                         myMusic.trigger(SND_INT2_AFTER);
@@ -464,14 +461,15 @@ int main(void)
                 #endif // SND_ENTERERROR
                 uint8_t checkSerial = 0;
 
-                while (!myButton.read())
+                while (!myButton.read() && checkSerial != 'D')
                 {
                     if (DBSerial.available())
                     {
-                        if (DBSerial.read() == 'D') break;
+                        checkSerial = DBSerial.read();
                     }
                 }
-                state = INIT;
+                if (checkSerial == 'D') debugMode = SERIAL_DEBUG;
+                else state = INIT;
                 #ifdef SND_LEAVEERROR
                     myMusic.playHold(SND_LEAVEERROR, &myButton);
                 #endif // SND_LEAVEERROR
@@ -610,6 +608,7 @@ int main(void)
 
                     case 'Y':
                         DBSerial.print(const_cast <char*> ("Body On.."));
+                        myBody.bodyTwitch();
                         if (myBody.bodyOn()) DBSerial.println(const_cast <char*> ("Error"));
                         else DBSerial.println(const_cast <char*> ("Good"));
                         break;
