@@ -79,11 +79,11 @@ uint8_t Blade::raiseBladePoll(uint8_t reset)
             turnOff();
             bladeStatus = ERROR;
         }
-        else if (pulseState == 2 && getTimer() - pulseTimer >= 31)
+        else if (pulseState == 2 && getTimer() - pulseTimer >= 34)
         {
             pulseTimer = getTimer();
             pulseState = 0;
-            //BLADE_MOTOR_OFF();bb
+            //BLADE_MOTOR_OFF();
         }
         else if (pulseState == 1 && getTimer() - pulseTimer >= 10)  //20
         {

@@ -189,6 +189,8 @@ uint8_t Head::tiltHeadUpPoll(uint8_t reset)
         }
         break;
     case DONE:
+        setTimer();
+        while (getTimer() < 10);
         TILT_BRAKE();
         setTimer();
         while (getTimer() < TILT_MTR_BRAKE_HOLD);
@@ -252,10 +254,6 @@ void Head::printDebug(DebugSerial *dbSerial)
     dbSerial->print(const_cast <char*>("\n\rHoist: "));
     if (IS_HOIST_DOWN()) dbSerial->print(const_cast <char*>("DN"));
     else dbSerial->print(const_cast <char*>("UP"));
-
-    dbSerial->print(const_cast <char*>("\n\rMotor Fault:"));
-    if (IS_HOIST_FAULT()) dbSerial->print(const_cast <char*>(" Y"));
-    else dbSerial->print(const_cast <char*>(" N"));
 }
 
 void Head::sol(uint8_t state)

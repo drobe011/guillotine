@@ -6,6 +6,7 @@ Body::Body(volatile uint16_t * ptr_T) :
     CONFIG_BODY();
     CONFIG_ENABLE();
     CONFIG_DIR();
+    CONFIG_POS();
     configTimer();
 }
 
@@ -29,28 +30,27 @@ void Body::configTimer()
     OCR3A = 0;
 }
 //duty = 1-255 (0 is off); dir 1 = forward, 2 = reverse
-uint8_t Body::bodyOn(uint8_t duty, uint8_t dir)
+void Body::bodyOn(uint8_t duty, uint8_t dir)
 {
     OCR3A = duty;
     if (dir) DIR_FORWARD();
     else DIR_REVERSE();
     BODY_ON();
-    return IS_BODY_FAULT();
 }
 
-void Body::turnOff()
+void Body::turnOff(uint8_t notnow)
 {
+    if (notnow == 1)
+    {
+        setTimer();
+        while (!IS_BODY_REST())
+        {
+            if (getTimer() > BODY_MAX_REST_WAIT) break;
+        }
+    }
     BODY_OFF();
     OCR3A = 0;
 }
-
-//uint8_t Body::bodyReverse()
-//{
-//    BODY_OFF();
-//    REVERSE_DIR_IN_STEP();
-//    BODY_ON();
-//    return !IS_BODY_FAULT();
-//}
 
 uint8_t Body::bodyKickPoll(uint8_t reset)
 {
@@ -85,15 +85,16 @@ void Body::bodyTwitch()
         bodyOn(loops+100, dirToggle);
         setTimer();
         while (getTimer() < 15);
-        turnOff();
+        turnOff(2);
         dirToggle ^= 1;
+        PINC |= _BV(PINC6);
     }
-    turnOff();
+    turnOff(2);
 }
 void Body::printDebug(DebugSerial *dbSerial)
 {
-    dbSerial->print(const_cast <char*>("\n\rBody Fault: "));
-    if (IS_BODY_FAULT()) dbSerial->print(const_cast <char*>("Y"));
-    else dbSerial->print(const_cast <char*>("N"));
+    dbSerial->print(const_cast <char*>("\n\rBody Position: "));
+    if (IS_BODY_REST()) dbSerial->print(const_cast <char*>("REST"));
+    else dbSerial->print(const_cast <char*>("KICK"));
     //dbSerial->println(const_cast <char*> ("how"));
 }

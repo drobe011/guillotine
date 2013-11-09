@@ -2,7 +2,7 @@
 #define GULLIOTINE_H_
 
 #include <avr/io.h>
-#include <avr/iom1284p.h>
+//#include <avr/iom1284p.h>
 #include <avr/interrupt.h>
 #include <debug/debugserial.h>
 #include "musicserial.h"
@@ -11,10 +11,13 @@
 #include "button.h"
 #include "strobe.h"
 #include "body.h"
+//#include "guy.h"
 
 #define LED_DDR DDRC
 #define LED_PORT PORTC
 #define LED_PIN 6
+
+#define NUM_OF_ERROR_TRY 2
 
 #define SETTIMERSEC(a) a*2
 #define SETTIMERMIN(a) (a*2)*60

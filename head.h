@@ -51,8 +51,6 @@
 #define IS_HEAD_DOWN_PIN 5
 #define IS_HEAD_UP_PORT PINA
 #define IS_HEAD_UP_PIN 4
-#define IS_HOIST_FAULT_PORT PINB
-#define IS_HOIST_FAULT_PIN 2
 
 //----------------------------
 #define IS_TILT_UP_PORT PINB
@@ -193,10 +191,6 @@ class Head
         __inline__ uint8_t IS_HEAD_DOWN()
         {
             return !(IS_HEAD_DOWN_PORT & _BV(IS_HEAD_DOWN_PIN));
-        }
-        __inline__ uint8_t IS_HOIST_FAULT()
-        {
-            return IS_HOIST_FAULT_PORT & _BV(IS_HOIST_FAULT_PIN);
         }
         __inline__ uint8_t IS_TILT_DOWN()
         {

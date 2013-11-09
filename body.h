@@ -14,21 +14,22 @@
 #define BODY_DIR_PORT PORTC
 #define BODY_DIR_DDR DDRC
 #define BODY_DIR_PIN 1
-#define BODY_FAULT_PORT PINB
-#define BODY_FAULT_PIN 2
+#define BODY_POS_PORT PINB
+#define BODY_POS_PU PORTB
+#define BODY_POS_PIN 2
 
 #define DEFAULT_DUTY 255
 #define BODY_INIT_LENGTH 100
 #define BODY_KICK_LENGTH 200
+#define BODY_MAX_REST_WAIT 300
 
 class Body
 {
     public:
         Body(volatile uint16_t * ptr_T);
         uint8_t init();
-        uint8_t bodyOn(uint8_t = DEFAULT_DUTY, uint8_t = 1);
-        void turnOff();
-        //uint8_t bodyReverse();
+        void bodyOn(uint8_t = DEFAULT_DUTY, uint8_t = 1);
+        void turnOff(uint8_t = 1);
         uint8_t bodyKickPoll(uint8_t = 0);
         void bodyTwitch();
         void printDebug(DebugSerial *);
@@ -64,6 +65,10 @@ class Body
         {
             BODY_DIR_DDR |= _BV(BODY_DIR_PIN);
         }
+        __inline__ void CONFIG_POS()
+        {
+            BODY_POS_PU |= _BV(BODY_POS_PIN);
+        }
         __inline__ void DIR_FORWARD()
         {
             BODY_DIR_PORT |= _BV(BODY_DIR_PIN);
@@ -80,13 +85,13 @@ class Body
         {
             BODY_ENABLE_PORT &= ~_BV(BODY_ENABLE_PIN);
         }
-        __inline__ uint8_t IS_BODY_FAULT()
-        {
-            return BODY_FAULT_PORT & _BV(BODY_FAULT_PIN);
-        }
         __inline__ void REVERSE_DIR_IN_STEP()
         {
             BODY_DIR_PORT ^= _BV(BODY_DIR_PIN);
+        }
+        __inline__ uint8_t IS_BODY_REST()
+        {
+            return !(BODY_POS_PORT & _BV(BODY_POS_PIN));
         }
 };
 

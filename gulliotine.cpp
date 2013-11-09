@@ -1,4 +1,6 @@
 
+//scream before blade lower
+
 #define DEBUG
 
 #include "gulliotine.h"
@@ -52,6 +54,7 @@ int main(void)
     Button myButton = Button(ptr_Timer);
     Strobe myStrobe = Strobe(ptr_Timer);
     Body myBody = Body(ptr_Timer);
+    //Guy myGuy = Guy(ptr_Timer);
     //Music myMusic = Music();
 
     //SET UP LOCAL (MAIN SCOPED) VARIABLES
@@ -62,6 +65,7 @@ int main(void)
     uint8_t forceNextState = 0; //FLAG THAT BUTTON PRESS WHILE IN WAIT STATE
     uint8_t pollState = 0;      //HOLDS POLLING INFO (WORKING, COMPLETE, ERROR)
     uint16_t nextWaitTime = 0;  //HOLDS PAUSE TO NEXT RUN STATE
+    uint8_t errorTry = 0;
 
     sei();
 
@@ -111,6 +115,7 @@ int main(void)
                     state = ERROR;
                     break;
                 }
+                //if (myGuy.isGuyHere()) myGuy.init();
                 myStrobe.init();
                 #ifdef SND_LEAVEINIT
                     myMusic.playHold(SND_LEAVEINIT, &myButton);
@@ -118,10 +123,10 @@ int main(void)
                 state = WAIT;
                 nextState = LOWER;
                 nextWaitTime = CHOP_PAUSE_LONG;
-                setTimer(); //SO WAIT STATE STARTS WITH TIMER AT 0
                 #ifdef SND_LOWER_BEFORE
-                    myMusic.trigger(SND_LOWER_BEFORE);
+                    myMusic.playHold(SND_LOWER_BEFORE, &myButton);
                 #endif // SND_LOWER_BEFORE
+                setTimer(); //SO WAIT STATE STARTS WITH TIMER AT 0
                 break;
             }
             //WAIT: WAIT UNTIL TIME TO DO nextState
@@ -148,6 +153,19 @@ int main(void)
                     #ifdef SND_LOWER_ON
                         myMusic.trigger(SND_LOWER_ON);
                     #endif // SND_LOWER_ON
+
+/*                     pollState = Guy::WORKING;
+ *                     myGuy.pullLeverPoll(Guy::RESET);
+ *                     while (pollState != Guy::COMPLETE && pollState != Guy::ERROR)
+ *                     {
+ *                         pollState = myGuy.pullLeverPoll();
+ *                         if(myButton.read())
+ *                         {
+ *                             break;
+ *                         }
+ *                     }
+ */
+
                     pollState = Blade::WORKING;
                     myBlade.lowerBladePoll(Blade::RESET);
                     while (pollState != Blade::COMPLETE && pollState != Blade::ERROR)
@@ -181,7 +199,7 @@ int main(void)
 
                 case HEADLOWER:
                     #ifdef SND_HEAD_LOWER_ON
-                        myMusic.trigger(SND_HEAD_LOWER_ON);
+                        myMusic.playHold(SND_HEAD_LOWER_ON, &myButton);
                     #endif // SND_HEAD_LOWER_ON
                     pollState = Head::WORKING;
                     myHead.lowerHeadPoll(Head::RESET);
@@ -200,7 +218,7 @@ int main(void)
                     else
                     {
                         #ifdef SND_HEAD_LOWER_AFTER
-                            myMusic.trigger(SND_HEAD_LOWER_AFTER);
+                            myMusic.playHold(SND_HEAD_LOWER_AFTER, &myButton);
                         #endif // SND_HEAD_LOWER_AFTER
                         state = WAIT;
                         nextState = BODYTWITCH;
@@ -215,7 +233,7 @@ int main(void)
                     #ifdef SND_BODY_ON
                         myMusic.trigger(SND_BODY_ON);
                     #endif // SND_BODY_ON
-                    myBody.bodyTwitch();
+                    //myBody.bodyTwitch();
                     pollState = Body::WORKING;
                     myBody.bodyKickPoll(Body::RESET);
                     while (pollState != Body::COMPLETE && pollState != Body::ERROR)
@@ -250,7 +268,17 @@ int main(void)
                     #endif // SND_INT1_ON
 
                     myStrobe.strobeOn();
-                    myBody.bodyTwitch();
+                    pollState = Body::WORKING;
+                    myBody.bodyKickPoll(Body::RESET);
+                    while (pollState != Body::COMPLETE && pollState != Body::ERROR)
+                    {
+                        pollState = myBody.bodyKickPoll();
+                        if(myButton.read())
+                        {
+                            pollState = Body::ERROR;
+                            break;
+                        }
+                    }
                     myStrobe.strobeOff();
 
                     #ifdef SND_INT1_AFTER
@@ -269,6 +297,19 @@ int main(void)
                     #ifdef SND_RAISE_ON
                         myMusic.trigger(SND_RAISE_ON);
                     #endif // SND_RAISE_ON
+
+/*                     pollState = Guy::WORKING;
+ *                     myGuy.resetLeverPoll(Guy::RESET);
+ *                     while (pollState != Guy::COMPLETE && pollState != Guy::ERROR)
+ *                     {
+ *                         pollState = myGuy.resetLeverPoll();
+ *                         if(myButton.read())
+ *                         {
+ *                             break;
+ *                         }
+ *                     }
+ */
+
                     pollState = Blade::WORKING;
                     myBlade.raiseBladePoll(Blade::RESET);
                     while (pollState != Blade::COMPLETE && pollState != Blade::ERROR)
@@ -350,7 +391,7 @@ int main(void)
                     else
                     {
                         #ifdef SND_HEAD_TILT_AFTER
-                            myMusic.trigger(SND_HEAD_TILT_AFTER);
+                            myMusic.playHold(SND_HEAD_TILT_AFTER, &myButton);
                         #endif // SND_HEAD_TILT_AFTER
                         state = WAIT;
                         nextState = LOWERTILTROD;
@@ -431,7 +472,18 @@ int main(void)
                     #endif // SND_INT2_ON
 
                     myStrobe.strobeOn();
-                    myBody.bodyTwitch();
+                    myStrobe.strobeOn();
+                    pollState = Body::WORKING;
+                    myBody.bodyKickPoll(Body::RESET);
+                    while (pollState != Body::COMPLETE && pollState != Body::ERROR)
+                    {
+                        pollState = myBody.bodyKickPoll();
+                        if(myButton.read())
+                        {
+                            pollState = Body::ERROR;
+                            break;
+                        }
+                    }
                     myStrobe.strobeOff();
 
                     #ifdef SND_INT2_AFTER
@@ -442,38 +494,51 @@ int main(void)
                     nextState = LOWER;
                     nextWaitTime = CHOP_PAUSE_LONG;
                     #ifdef SND_LOWER_BEFORE
-                        myMusic.trigger(SND_LOWER_BEFORE);
+                        myMusic.playHold(SND_LOWER_BEFORE, &myButton);
                     #endif // SND_LOWER_BEFORE
                     break;
                 }
                 break;
             }
             case ERROR:
-                LED_ON();
-                myMusic.stop();
-                myBlade.turnOff();
-                myHead.turnOff();
-                myBody.turnOff();
-                myStrobe.strobeOff();
-
-                #ifdef SND_ENTERERROR
-                    myMusic.playHold(SND_ENTERERROR, &myButton);
-                #endif // SND_ENTERERROR
-                uint8_t checkSerial = 0;
-
-                while (!myButton.read() && checkSerial != 'D')
+                if (errorTry <= NUM_OF_ERROR_TRY)
                 {
-                    if (DBSerial.available())
-                    {
-                        checkSerial = DBSerial.read();
-                    }
+                    errorTry++;
+                    #ifdef SND_OOPS
+                        myMusic.playHold(SND_OOPS, &myButton);
+                    #endif // SND_OOPS
+                    state = RUN;
+                    break;
                 }
-                if (checkSerial == 'D') debugMode = SERIAL_DEBUG;
-                else state = INIT;
-                #ifdef SND_LEAVEERROR
-                    myMusic.playHold(SND_LEAVEERROR, &myButton);
-                #endif // SND_LEAVEERROR
-                break;
+                else
+                {
+                    errorTry = 0;
+                    LED_ON();
+                    myMusic.stop();
+                    myBlade.turnOff();
+                    myHead.turnOff();
+                    myBody.turnOff();
+                    myStrobe.strobeOff();
+
+                    #ifdef SND_ENTERERROR
+                        myMusic.playHold(SND_ENTERERROR, &myButton);
+                    #endif // SND_ENTERERROR
+                    uint8_t checkSerial = 0;
+
+                    while (!myButton.read() && checkSerial != 'D')
+                    {
+                        if (DBSerial.available())
+                        {
+                            checkSerial = DBSerial.read();
+                        }
+                    }
+                    if (checkSerial == 'D') debugMode = SERIAL_DEBUG;
+                    else state = INIT;
+                    #ifdef SND_LEAVEERROR
+                        myMusic.playHold(SND_LEAVEERROR, &myButton);
+                    #endif // SND_LEAVEERROR
+                }
+                    break;
         }
             break;
 
@@ -519,9 +584,29 @@ int main(void)
                         DBSerial.println(const_cast <char*> ("[L]ed on / [l]ed off"));
                         DBSerial.println(const_cast <char*> ("m[U]sic on / off"));
                         DBSerial.println(const_cast <char*> ("[N]ext track / [P]rev track"));
+                        //DBSerial.println(const_cast <char*> ("[A]rm Pull / [a]reset arm"));
                         DBSerial.println(const_cast <char*> ("d[e]bug info"));
 
                         break;
+
+/*                     case 'A':
+ *                         DBSerial.print(const_cast <char*> ("Arm Pull.."));
+ *                         pollState = Guy::WORKING;
+ *                         myGuy.pullLeverPoll(Guy::RESET);
+ *                         while (pollState != Guy::COMPLETE && pollState != Guy::ERROR) pollState = myGuy.pullLeverPoll();
+ *                         if (pollState == Guy::COMPLETE) DBSerial.println(const_cast <char*> ("Good"));
+ *                         else DBSerial.println(const_cast <char*> ("Error"));
+ *                         break;
+ *
+ *                     case 'a':
+ *                         DBSerial.print(const_cast <char*> ("Arm Reset.."));
+ *                         pollState = Guy::WORKING;
+ *                         myGuy.resetLeverPoll(Guy::RESET);
+ *                         while (pollState != Guy::COMPLETE && pollState != Guy::ERROR) pollState = myGuy.resetLeverPoll();
+ *                         if (pollState == Guy::COMPLETE) DBSerial.println(const_cast <char*> ("Good"));
+ *                         else DBSerial.println(const_cast <char*> ("Error"));
+ *                         break;
+ */
 
                     case 'B':
                         DBSerial.print(const_cast <char*> ("Blade Up.."));
@@ -607,16 +692,13 @@ int main(void)
                         break;
 
                     case 'Y':
-                        DBSerial.print(const_cast <char*> ("Body On.."));
-                        myBody.bodyTwitch();
-                        if (myBody.bodyOn()) DBSerial.println(const_cast <char*> ("Error"));
-                        else DBSerial.println(const_cast <char*> ("Good"));
+                        DBSerial.println(const_cast <char*> ("Body On.."));
+                        //myBody.bodyTwitch();
+                        myBody.bodyOn();
                         break;
 
                     case 'y':
-                        DBSerial.print(const_cast <char*> ("Body Off.."));
-                        if (myBody.bodyOn(0)) DBSerial.println(const_cast <char*> ("Error"));
-                        else DBSerial.println(const_cast <char*> ("Good"));
+                        DBSerial.println(const_cast <char*> ("Body Off.."));
                         myBody.turnOff();
                         break;
 
